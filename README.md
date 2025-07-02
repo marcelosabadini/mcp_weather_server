@@ -46,9 +46,9 @@ This server does not require an API key. It uses the Open-Meteo API, which is fr
 
 ## Usage
 
-This server provides several tools: `get_weather`, `get_weather_by_datetime_range`, and `get_current_datetime`.
+This server provides several tools: `get_current_weather`, `get_weather_by_datetime_range`, and `get_current_datetime`.
 
-### `get_weather`
+### `get_current_weather`
 
 Retrieves the current weather information for a given city.
 
@@ -63,7 +63,7 @@ To get the weather in Taipei, you would use the tool like this:
 ```
 <use_mcp_tool>
 <server_name>weather</server_name>
-<tool_name>get_weather</tool_name>
+<tool_name>get_current_weather</tool_name>
 <arguments>
 {
   "city": "Taipei"
