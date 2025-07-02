@@ -1,0 +1,2 @@
+class McpError(Exception):
+    pass

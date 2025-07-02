@@ -24,48 +24,73 @@ async def get_coordinates(client: httpx.AsyncClient, city: str) -> tuple[float, 
     geo_response = await client.get(
         f"https://geocoding-api.open-meteo.com/v1/search?name={city}"
     )
-    if geo_response.status_code != 200 or "results" not in geo_response.json():
+    data = geo_response.json() if geo_response.status_code == 200 else {}
+    results = data.get("results") if isinstance(data, dict) else None
+    if not results:
         raise ValueError(f"Error: Could not retrieve coordinates for {city}.")
 
-    geo_data = geo_response.json()["results"][0]
+    geo_data = results[0]
     return geo_data["latitude"], geo_data["longitude"]
 
 
 @mcp.tool()
-async def get_current_weather(city: Annotated[str ,Field(description="The name of the city to fetch weather information for, PLEASE NOTE English name only, if the parameter city isn't English please translate to English before invoking this function.")]) -> Annotated[str, Field(description="A string describing the current weather condition and temperature in the specified city, or an error message if the request fails.")]:
+async def get_current_weather(
+    city: Annotated[str, Field(description="The name of the city to fetch weather information for, PLEASE NOTE English name only, if the parameter city isn't English please translate to English before invoking this function.")],
+    client: httpx.AsyncClient | None = None,
+) -> Annotated[str, Field(description="A string describing the current weather condition and temperature in the specified city, or an error message if the request fails.")]:
 
     """Get current weather information for a specified city.
     It extracts the current hour's temperature and weather code, maps
     the weather code to a human-readable description, and returns a formatted summary.
     """
 
-    async with httpx.AsyncClient() as client:
+    async def _fetch(client_obj: httpx.AsyncClient) -> str:
         # Get coordinates using the Geocoding API
         try:
             try:
-                latitude, longitude = await get_coordinates(client, city)
+                latitude, longitude = await get_coordinates(client_obj, city)
             except ValueError as e:
                 return str(e)
             # Get weather data using the Forecast API
             url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,weather_code&timezone=GMT&forecast_days=1"
             logger.info(f"api: {url}")
-            weather_response = await client.get(url)
+            weather_response = await client_obj.get(url)
             if weather_response.status_code != 200:
                 return f"Error: Could not retrieve weather information for {city}."
 
             weather_data = weather_response.json()
-            curIndex = utils.get_closest_utc_index(weather_data["hourly"]["time"])
-            temperature = weather_data["hourly"]["temperature_2m"][curIndex]
-            weather_code = weather_data["hourly"]["weather_code"][curIndex]
-            relative_humidity = weather_data["hourly"]["relative_humidity_2m"][curIndex]
-            dew_point = weather_data["hourly"]["dew_point_2m"][curIndex]
+            cur_index = utils.get_closest_utc_index(weather_data["hourly"]["time"])
+            temperature = weather_data["hourly"]["temperature_2m"][cur_index]
+            weather_code = weather_data["hourly"]["weather_code"][cur_index]
+            relative_humidity = weather_data["hourly"]["relative_humidity_2m"][cur_index]
+            dew_point = weather_data["hourly"]["dew_point_2m"][cur_index]
 
             description = utils.weather_descriptions.get(weather_code, "Unknown weather code")
 
-            return f"The weather in {city} is {description} with a temperature of {temperature}°C, Relative humidity at 2 meters: {relative_humidity} %, Dew point temperature at 2 meters: {dew_point}"
+            return (
+                f"The weather in {city} is {description} with a temperature of {temperature}°C, "
+                f"Relative humidity at 2 meters: {relative_humidity} %, "
+                f"Dew point temperature at 2 meters: {dew_point}"
+            )
         except Exception as e:
             logger.exception(f"API invoke error: {str(e)}")
             return f"API invoke error: {str(e)}"
+
+    if client is None:
+        async with httpx.AsyncClient() as new_client:
+            return await _fetch(new_client)
+    else:
+        return await _fetch(client)
+
+
+# Backwards compatible alias expected by some clients and tests
+@mcp.tool()
+async def get_weather(
+    city: Annotated[str, Field(description="The name of the city to fetch weather information for")],
+    client: httpx.AsyncClient | None = None,
+) -> Annotated[str, Field(description="A string describing the current weather condition and temperature in the specified city, or an error message if the request fails.")]:
+    """Alias for :func:`get_current_weather`."""
+    return await get_current_weather(city, client=client)
 
 @mcp.tool()
 async def get_weather_by_datetime_range(
@@ -127,8 +152,8 @@ async def get_weather_by_datetime_range(
             return f"API invoke error: {str(e)}"
 
 @mcp.tool()
-async def get_current_datetime(timezone_name: Annotated[str, Field(description="IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use UTC timezone if no timezone provided by the user.")]) -> str :
-    """Get current time in specified timezone"""
+async def get_current_datetime(timezone_name: Annotated[str, Field(description="IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use UTC timezone if no timezone provided by the user." )]) -> utils.TimeResult:
+    """Get current time in specified timezone."""
     timezone = utils.get_zoneinfo(timezone_name)
     current_time = datetime.now(timezone)
 
